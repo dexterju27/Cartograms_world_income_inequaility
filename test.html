@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Cartograms with d3 &amp; TopoJSON</title>
+    <meta charset="utf-8">
+    <meta property="og:image" content="placeholder.png">
+    <script src="https://code.jquery.com/jquery-2.2.4.min.js" integrity="sha256-BbhdlvQf/xTY9gja0Dq3HiwQF8LaCRTXxZKRutelT44=" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.11.4/themes/smoothness/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-1.10.2.js"></script>
+    <script src="https://code.jquery.com/ui/1.11.4/jquery-ui.js"></script>
+    <!-- bootstrap -->
+    <script src="http://d3js.org/d3.v3.min.js"></script>
+    <script src="http://d3js.org/d3.geo.projection.v0.min.js"></script>
+    <script src="http://d3js.org/topojson.v1.min.js"></script>
+    <script src="http://d3js.org/queue.v1.min.js"></script>
+    <script src="lib/colorbrewer.js"></script>
+    <script src="cartogram.js"></script>
+    <style>
+    .ui-slider-horizontal {
+        height: 8px;
+        width: 400px;
+    }
+    
+    .ui-slider .ui-slider-handle {
+        height: 15px;
+        width: 5px;
+        padding-left: 5px;
+    }
+    
+    h1 {
+        font-size: 200%;
+        margin: 0 0 15px 0;
+    }
+    
+    .hidden {
+        display: none;
+    }
+    
+    div.tooltip {
+        color: #222;
+        background: #fff;
+        padding: .5em;
+        text-shadow: #f5f5f5 0 1px 0;
+        border-radius: 2px;
+        box-shadow: 0px 0px 2px 0px #a6a6a6;
+        opacity: 0.9;
+        position: absolute;
+    }
+    
+    .country {
+        fill: #ccc;
+        stroke: #fff;
+        stroke-width: .5px;
+        stroke-linejoin: round;
+    }
+    
+    .graticule {
+        fill: none;
+        stroke: #000;
+        stroke-opacity: .3;
+        stroke-width: .5px;
+    }
+    
+    .graticule.outline {
+        stroke: #333;
+        stroke-opacity: 1;
+        stroke-width: 1.5px;
+    }
+    </style>
+    <title></title>
+</head>
+
+<body>
+    <h1 id="title">When the world was in 2015</h1>
+    <div id="map" width=480>
+        <svg> </svg>
+    </div>
+    <p> Your can type in a year between 1800 - 2015:
+        <input type="text" id="text_input" value="2015" />
+    </p>
+    <div id="slider">
+    </div>
+</body>
+<script type="text/javascript">
+$(function() {
+    $("#slider").slider({
+        max: 2015,
+        min: 1800,
+        value: 2015,
+        change: function(event, ui) {
+            if (ui.value == year) return;
+            $("#text_input").val(ui.value);
+            update(ui.value);
+        }
+    });
+
+    $("#text_input").change(function() {
+        $("#slider").slider("value", $("#text_input").val());
+    });
+});
+
+var features_copy;
+var year = 2015;
+var tooltip = d3.select("#map").append("div")
+    .attr("class", "tooltip");
+
+var colors = colorbrewer.RdYlBu[3]
+    .reverse()
+    .map(function(rgb) {
+        return d3.hsl(rgb);
+    });
+var test;
+
+var width = 960
+var height = 480
+
+
+// var projection = d3.geo.mercator()
+//     .scale((width + 1) / 2 / Math.PI)
+//     .translate([width / 2, height / 2])
+//     .precision(.1);
+
+
+// var path = d3.geo.path()
+//     .projection(projection);
+var layer;
+var draw_world;
+
+function intial_svg(svg) {
+    svg.append("path")
+        .datum(graticule)
+        .attr("class", "graticule")
+        .attr("d", path);
+
+    svg.append("path")
+        .datum(graticule.outline)
+        .attr("class", "graticule outline")
+        .attr("d", path);
+    layer = svg.append("g")
+        .attr("id", "layer");
+    draw_world = layer.append("g")
+        .attr("id", "countries")
+        .selectAll("path");
+
+
+    zoom = d3.behavior.zoom()
+        .translate([-38, 32])
+        .scale(.94)
+        .scaleExtent([0.5, 10.0])
+        .on("zoom", updateZoom)
+
+    updateZoom();
+
+}
+
+function updateZoom() {
+    var scale = zoom.scale();
+    d3.selectAll("path").attr("transform",
+        "translate(" + zoom.translate() + ") " +
+        "scale(" + [scale, scale] + ")");
+}
+
+var svg = d3.select("svg")
+    .attr("width", width)
+    .attr("height", height);
+
+var projection = d3.geo.equirectangular()
+    .scale(153)
+    .translate([width / 2, height / 2])
+    .precision(.1);
+
+var graticule = d3.geo.graticule();
+
+var path = d3.geo.path()
+    .projection(projection);
+
+
+
+
+
+queue()
+    .defer(d3.json, "data/world_map.topojson")
+    .defer(d3.csv, "data/GDP_Name.csv")
+    .await(ready);
+
+var data = {};
+var gdp = {};
+
+//  how to get data out of CSV
+function update(value) {
+    year = value;
+    d3.select("h1").html("When the world was in " + year)
+    svg.remove();
+    svg = d3.selectAll("#map").append("svg")
+        .attr("width", width)
+        .attr("height", height);
+    intial_svg(svg);
+
+
+    queue()
+        .defer(d3.json, "data/world_map.topojson")
+        .defer(d3.csv, "data/GDP_Name.csv")
+        .await(ready);
+}
+
+
+
+
+function ready(error, topology, gdp_name) {
+    if (error) return console.warn(error);
+    data = jQuery.extend(true, {}, topology);
+    gdp = jQuery.extend(true, {}, gdp_name);;
+    // Instantiate a slider
+
+    // Call a method on the slider
+
+    // For non-getter methods, you can chain together commands
+    intial_svg(svg);
+    var hi = 0;
+    var lo = 0;
+    var carto = d3.cartogram()
+        .projection(projection)
+        .properties(function(d) {
+            // this adds the "properties" properties 
+            // to the geometries
+            var obj = {};
+            var getdata = gdp_name.filter(function(n) {
+                return d.id == n.id;
+            })[0];
+            if (typeof getdata === "undefined") {
+                obj.name = "undefined";
+                obj.gdp = "undefined";
+            } else {
+                obj.name = getdata.name;
+                obj.gdp = +getdata[year];
+                if (obj.gdp > hi) {
+                    hi = obj.gdp;
+                }
+                if (obj.gdp < lo)
+                    lo = obj.gdp;
+            }
+            return obj;
+        });
+
+    var countries = carto.features(topology, topology.objects.countries.geometries);
+
+    var color = d3.scale.linear()
+        .range(colors)
+        .domain(lo < 0 ? [lo, 0, hi] : [lo, (lo + hi) / 2, hi]);
+
+    // normalize the scale to positive numbers
+    var scale = d3.scale.linear()
+        .domain([lo, hi])
+        .range([1, 100]);
+
+    // tell the cartogram to use the scaled values
+
+    carto.value(function(d) {
+        if (d.properties.gdp === 'undefined') return 1;
+        else {
+            return scale(d.properties.gdp);
+        }
+    });
+
+    var new_countries = carto(topology, topology.objects.countries.geometries).features;
+
+    var draw_country = svg.selectAll("path")
+        .data(new_countries);
+
+    draw_country.enter()
+        .append("path")
+        .attr("class", "country")
+        .attr("id", function(d) {
+            console.log(d.properties.gdp)
+            return d.properties.name
+        })
+        .style("fill", function(d) {
+            console.log(color(d.properties.gdp));
+            return color(d.properties.gdp);
+        })
+        .attr("d", carto.path);
+
+    draw_country
+        .on("mousemove", function(d, i) {
+            var mouse = d3.mouse(svg.node()).map(function(d) {
+                return parseInt(d);
+            });
+
+            tooltip
+                .classed("hidden", false)
+                .attr("style", "left:" + (mouse[0] + 15) + "px;top:" + (mouse[1] + 100) + "px")
+                .html(d.properties.name + '\n' + d.properties.gdp)
+        })
+        .on("mouseout", function(d, i) {
+            tooltip.classed("hidden", true)
+        });
+}
+
+// .properties(function(d) { // return dataById[d.id]; // })
+
+// .value(function(d) { // return Math.random() * 100; // });
+
+// d3.json("data/world_map.topojson", function(error, topology) {
+//     if (error) return console.warn(error);
+//     var features = carto(topology, topology.objects.countries.geometries).features;
+//     console.log(features)
+//     console.log("test")
+
+//     svg.selectAll("path")
+//         .data(features)
+//         .enter()
+//         .append("path")
+//         .attr("class", "country")
+//         .attr("d", carto.path);
+// });
+</script>
+
+</html>
