@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+<!-- change color -->
 
 <head>
     <title>Cartograms with d3 &amp; TopoJSON</title>
@@ -78,6 +79,8 @@
     </div>
     <p> Your can type in a year between 1800 - 2015:
         <input type="text" id="text_input" value="2015" />
+        <button onclick="function(){$('#text_input').trigger(" change ");}">Go to this year!</button>
+        <button onclick="autoPlay()" id="autoplay"> auto play</button>
     </p>
     <div id="slider">
     </div>
@@ -100,20 +103,22 @@ $(function() {
     });
 });
 
-var features_copy;
 var year = 2015;
 var tooltip = d3.select("#map").append("div")
     .attr("class", "tooltip");
 
-var colors = colorbrewer.RdYlBu[3]
-    .reverse()
+var colors = colorbrewer.GnBu[3]
+    // .reverse()
     .map(function(rgb) {
         return d3.hsl(rgb);
     });
-var test;
 
 var width = 960
 var height = 480
+var carto;
+var max_of_year = 0;
+var min_of_year = 0;
+var topology_copy;
 
 
 // var projection = d3.geo.mercator()
@@ -128,15 +133,7 @@ var layer;
 var draw_world;
 
 function intial_svg(svg) {
-    svg.append("path")
-        .datum(graticule)
-        .attr("class", "graticule")
-        .attr("d", path);
 
-    svg.append("path")
-        .datum(graticule.outline)
-        .attr("class", "graticule outline")
-        .attr("d", path);
     layer = svg.append("g")
         .attr("id", "layer");
     draw_world = layer.append("g")
@@ -187,6 +184,18 @@ queue()
 var data = {};
 var gdp = {};
 
+function copyObject(o) {
+    var obj = {};
+    for (var k in o) obj[k] = copy(o[k]);
+    return obj;
+}
+
+
+function copy(o) {
+    return (o instanceof Array) ? o.map(copy) : (typeof o === "string" || typeof o === "number") ? o : copyObject(o);
+}
+
+
 //  how to get data out of CSV
 function update(value) {
     year = value;
@@ -196,30 +205,11 @@ function update(value) {
         .attr("width", width)
         .attr("height", height);
     intial_svg(svg);
-
-
-    queue()
-        .defer(d3.json, "data/world_map.topojson")
-        .defer(d3.csv, "data/GDP_Name.csv")
-        .await(ready);
+    draw_countries(carto, topology_copy)
 }
 
-
-
-
-function ready(error, topology, gdp_name) {
-    if (error) return console.warn(error);
-    data = jQuery.extend(true, {}, topology);
-    gdp = jQuery.extend(true, {}, gdp_name);;
-    // Instantiate a slider
-
-    // Call a method on the slider
-
-    // For non-getter methods, you can chain together commands
-    intial_svg(svg);
-    var hi = 0;
-    var lo = 0;
-    var carto = d3.cartogram()
+function readData(topology, gdp_name) {
+    carto = d3.cartogram()
         .projection(projection)
         .properties(function(d) {
             // this adds the "properties" properties 
@@ -229,21 +219,34 @@ function ready(error, topology, gdp_name) {
                 return d.id == n.id;
             })[0];
             if (typeof getdata === "undefined") {
-                obj.name = "undefined";
-                obj.gdp = "undefined";
-            } else {
-                obj.name = getdata.name;
-                obj.gdp = +getdata[year];
-                if (obj.gdp > hi) {
-                    hi = obj.gdp;
+                for (var year = 1800; year <= 2015; year++) {
+                    obj[year] = "undefined";
                 }
-                if (obj.gdp < lo)
-                    lo = obj.gdp;
+                obj.name = "undefined";
+
+            } else {
+                for (var year = 1800; year <= 2015; year++) {
+                    obj[year] = +getdata[year];
+                }
+                obj.name = getdata.name;
             }
+
             return obj;
         });
+    return carto;
+}
 
-    var countries = carto.features(topology, topology.objects.countries.geometries);
+function draw_countries(carto, topology) {
+    var features = carto.features(topology, topology.objects.countries.geometries)
+    intial_svg(svg);
+
+    hi = d3.max(features, function(d) {
+        return d.properties[year];
+    });
+
+    lo = d3.min(features, function(d) {
+        return d.properties[year];
+    });
 
     var color = d3.scale.linear()
         .range(colors)
@@ -255,11 +258,12 @@ function ready(error, topology, gdp_name) {
         .range([1, 100]);
 
     // tell the cartogram to use the scaled values
+    // legend
 
     carto.value(function(d) {
-        if (d.properties.gdp === 'undefined') return 1;
+        if (d.properties[year] === 'undefined') return 1;
         else {
-            return scale(d.properties.gdp);
+            return scale(d.properties[year]);
         }
     });
 
@@ -272,12 +276,10 @@ function ready(error, topology, gdp_name) {
         .append("path")
         .attr("class", "country")
         .attr("id", function(d) {
-            console.log(d.properties.gdp)
             return d.properties.name
         })
         .style("fill", function(d) {
-            console.log(color(d.properties.gdp));
-            return color(d.properties.gdp);
+            return color(d.properties[year]);
         })
         .attr("d", carto.path);
 
@@ -290,30 +292,49 @@ function ready(error, topology, gdp_name) {
             tooltip
                 .classed("hidden", false)
                 .attr("style", "left:" + (mouse[0] + 15) + "px;top:" + (mouse[1] + 100) + "px")
-                .html(d.properties.name + '\n' + d.properties.gdp)
+                .html(d.properties.name + '\n' + d.properties[year])
         })
         .on("mouseout", function(d, i) {
             tooltip.classed("hidden", true)
         });
+
 }
 
-// .properties(function(d) { // return dataById[d.id]; // })
+function ready(error, topology, gdp_name) {
+    if (error) return console.warn(error);
+    // data = jQuery.extend(true, {}, topology);
+    // gdp = jQuery.extend(true, {}, gdp_name);;
+    // Instantiate a slider
 
-// .value(function(d) { // return Math.random() * 100; // });
+    topology_copy = copy(topology)
+        // Call a method on the slider
 
-// d3.json("data/world_map.topojson", function(error, topology) {
-//     if (error) return console.warn(error);
-//     var features = carto(topology, topology.objects.countries.geometries).features;
-//     console.log(features)
-//     console.log("test")
+    // For non-getter methods, you can chain together commands
+    carto = readData(topology, gdp_name);
+    draw_countries(carto, topology);
 
-//     svg.selectAll("path")
-//         .data(features)
-//         .enter()
-//         .append("path")
-//         .attr("class", "country")
-//         .attr("d", carto.path);
-// });
+}
+var timer = undefined;
+
+function autoPlay() {
+    if (timer != undefined) {
+        clearInterval(timer);
+        timer = undefined;
+        $('#autoplay').html("auto play")
+
+    } else {
+        $('#autoplay').html("Stop")
+        var i = $('#slider').slider("option", "value");
+        timer = setInterval(function() {
+            i = i + 5;
+            if (i > 2015) {
+                clearInterval(timer);
+                $('#autoplay').html("auto play")
+            }
+            $("#slider").slider("value", i);
+        }, 1000);
+    }
+}
 </script>
 
 </html>
